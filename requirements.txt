@@ -1,0 +1,43 @@
+# Web Framework & API
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# HTTP & Scraping
+requests==2.31.0
+httpx==0.26.0
+beautifulsoup4==4.12.3
+lxml==5.1.0
+
+# Proxy & Session Management
+requests[socks]==2.31.0
+pysocks==1.7.1
+
+# Database
+sqlalchemy==2.0.25
+
+# Data Analysis & PV Calculation
+pandas==2.2.0
+numpy==1.26.3
+
+# Deduplication & Fuzzy Matching
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.25.0
+
+# Date Parsing
+python-dateutil==2.8.2
+dateparser==1.2.0
+
+# TUI (Text User Interface)
+rich==13.7.0
+textual==0.48.0
+
+# Utilities
+python-dotenv==1.0.0
+tenacity==8.2.3
+schedule==1.2.0
+cachetools==5.3.2
+
+# Async Support
+aiohttp==3.9.1
