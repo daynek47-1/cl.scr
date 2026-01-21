@@ -46,13 +46,15 @@ class EngineManager:
         password: str = None,
         worker_count: int = None,
         use_proxies: bool = None,
-        proxy_list: List[str] = None
+        proxy_list: List[str] = None,
+        quiet_mode: bool = True
     ):
         # Configuration from environment or parameters
         self.username = username or os.getenv('CASINO_USERNAME')
         self.password = password or os.getenv('CASINO_PASSWORD')
         self.worker_count = worker_count or int(os.getenv('WORKER_COUNT', 5))
         self.use_proxies = use_proxies or os.getenv('USE_PROXIES', 'false').lower() == 'true'
+        self.quiet_mode = quiet_mode
 
         # Proxy setup
         if proxy_list:
@@ -68,11 +70,17 @@ class EngineManager:
         # Run counter
         self.run_number = 0
 
-        logger.info(f"Engine Manager initialized:")
-        logger.info(f"  Workers: {self.worker_count}")
-        logger.info(f"  Proxies: {len(self.proxy_list) if self.use_proxies else 0}")
-        logger.info(f"  Purgatory check: Every {self.purgatory_interval} runs")
-        logger.info(f"  Resurrection check: Every {self.resurrection_interval} runs")
+        # Set logging level based on quiet mode
+        if self.quiet_mode:
+            # In quiet mode, only show warnings and errors
+            logging.getLogger().setLevel(logging.WARNING)
+            logging.getLogger('src.engine').setLevel(logging.WARNING)
+        else:
+            logger.info(f"Engine Manager initialized:")
+            logger.info(f"  Workers: {self.worker_count}")
+            logger.info(f"  Proxies: {len(self.proxy_list) if self.use_proxies else 0}")
+            logger.info(f"  Purgatory check: Every {self.purgatory_interval} runs")
+            logger.info(f"  Resurrection check: Every {self.resurrection_interval} runs")
 
     def run_cycle(self) -> Dict:
         """
@@ -83,16 +91,18 @@ class EngineManager:
         self.run_number += 1
         run_type = self._determine_run_type()
 
-        logger.info(f"=" * 60)
-        logger.info(f"Starting Run #{self.run_number} - Type: {run_type.upper()}")
-        logger.info(f"=" * 60)
+        if not self.quiet_mode:
+            logger.info(f"=" * 60)
+            logger.info(f"Starting Run #{self.run_number} - Type: {run_type.upper()}")
+            logger.info(f"=" * 60)
 
         start_time = datetime.utcnow()
 
         # Get sites to check based on run type
         sites_to_check = self._get_sites_for_run(run_type)
 
-        logger.info(f"Sites to check: {len(sites_to_check)}")
+        if not self.quiet_mode:
+            logger.info(f"Sites to check: {len(sites_to_check)}")
 
         if not sites_to_check:
             logger.warning("No sites to check!")
@@ -152,21 +162,22 @@ class EngineManager:
 
         db.close()
 
-        # Print console summary
+        # Print console summary (always show)
         console.print_summary()
 
-        # Log summary
-        logger.info(f"=" * 60)
-        logger.info(f"Run #{self.run_number} Complete!")
-        logger.info(f"  Duration: {scrape_run.duration_seconds:.2f}s")
-        logger.info(f"  Sites Checked: {stats['sites_checked']}")
-        logger.info(f"  Successful: {stats['sites_successful']}")
-        logger.info(f"  Failed: {stats['sites_failed']}")
-        logger.info(f"  Bonuses Found: {stats['bonuses_found']}")
-        logger.info(f"  New Bonuses: {stats['bonuses_new']}")
-        logger.info(f"  Expired: {expired_count}")
-        logger.info(f"  Deduplication Rate: {dedup_stats['deduplication_rate']}%")
-        logger.info(f"=" * 60)
+        # Log summary (only in verbose mode)
+        if not self.quiet_mode:
+            logger.info(f"=" * 60)
+            logger.info(f"Run #{self.run_number} Complete!")
+            logger.info(f"  Duration: {scrape_run.duration_seconds:.2f}s")
+            logger.info(f"  Sites Checked: {stats['sites_checked']}")
+            logger.info(f"  Successful: {stats['sites_successful']}")
+            logger.info(f"  Failed: {stats['sites_failed']}")
+            logger.info(f"  Bonuses Found: {stats['bonuses_found']}")
+            logger.info(f"  New Bonuses: {stats['bonuses_new']}")
+            logger.info(f"  Expired: {expired_count}")
+            logger.info(f"  Deduplication Rate: {dedup_stats['deduplication_rate']}%")
+            logger.info(f"=" * 60)
 
         return {
             'run_number': self.run_number,
@@ -221,7 +232,8 @@ class EngineManager:
         """Execute scraping with parallel workers"""
         results = []
 
-        logger.info(f"Launching {self.worker_count} workers...")
+        if not self.quiet_mode:
+            logger.info(f"Launching {self.worker_count} workers...")
 
         with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
             # Create workers
@@ -268,7 +280,8 @@ class EngineManager:
             for _, db in workers:
                 db.close()
 
-        logger.info("All workers completed")
+        if not self.quiet_mode:
+            logger.info("All workers completed")
         return results
 
     def _aggregate_results(self, results: List[Dict]) -> Dict:
@@ -291,7 +304,8 @@ class EngineManager:
         existing = db.query(MirrorSite).filter(MirrorSite.url == url).first()
 
         if existing:
-            logger.warning(f"Site already exists: {url}")
+            if not self.quiet_mode:
+                logger.warning(f"Site already exists: {url}")
             db.close()
             return existing
 
@@ -306,7 +320,8 @@ class EngineManager:
         db.add(site)
         db.commit()
 
-        logger.info(f"Added new mirror site: {url}")
+        if not self.quiet_mode:
+            logger.info(f"Added new mirror site: {url}")
 
         db.close()
         return site

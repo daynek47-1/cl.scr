@@ -41,7 +41,39 @@ Orchestrates heartbeat cycles with adaptive site checking:
 
 #### 4. **The Interface** (Dashboard & TUI)
 - **Web Dashboard**: Real-time bonus rankings, PV scores, filtering
-- **Command Center**: Matrix-style worker status updates
+- **2-Line Console**: Real-time monitoring with emoji-based health indicators
+
+### 2-Line Console Output
+
+When `QUIET_MODE=true` (default), the engine displays a clean 2-line console format:
+
+```
+🟢[100%][12/50][🟢][96%][🟢][143/487]📊[✅12][❌0][ERR0]✅[Active]🌐[https://casino-mirror1.com]
+🖥️[15%]💾[2.1GB]📶[1.2s]/[1.5s]🚀[8.3/s]/[7.9/s]👷[W3]⏱️[0:15:22]/[1:45:00] @[2:12:00]
+```
+
+**Line 1: Summary Metrics**
+- `🟢[100%]` - Proxy health (12-step gradient from 🟥 to 💚)
+- `[12/50]` - Current site / Total sites
+- `🟢[96%]` - Run health (success rate for this cycle)
+- `🟢` - Site history health (based on consecutive failures)
+- `[143/487]` - Bonuses found this site / Total bonuses
+- `[✅12]` - Successful sites this run
+- `[❌0]` - Failed sites this run
+- `[ERR0]` - Error count
+- `✅[Active]` - Current status
+- `🌐[URL]` - Site being processed
+
+**Line 2: Performance Diagnostics**
+- `🖥️[15%]` - CPU usage
+- `💾[2.1GB]` - Memory usage
+- `📶[1.2s]/[1.5s]` - Current latency / Average latency
+- `🚀[8.3/s]/[7.9/s]` - Current throughput / Average throughput
+- `👷[W3]` - Worker ID
+- `⏱️[0:15:22]/[1:45:00]` - Elapsed time / Total estimated time
+- `@[2:12:00]` - Estimated completion time
+
+Set `QUIET_MODE=false` in `.env` for verbose logging with full details.
 
 ## 📡 API Access Protocol
 
@@ -102,6 +134,9 @@ CASINO_PASSWORD=your_password
 WORKER_COUNT=5
 WORKER_DELAY_MIN=2
 WORKER_DELAY_MAX=5
+
+# Display Mode
+QUIET_MODE=true  # Only show 2-line console output (recommended)
 
 # Proxy Configuration (Optional)
 USE_PROXIES=true
