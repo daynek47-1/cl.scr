@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 import os
+from .broadcaster import broadcaster
 
 
 class TwoLineConsole:
@@ -248,6 +249,10 @@ class TwoLineConsole:
         # Print both lines (vertically stacked)
         print(line1)
         print(line2)
+
+        # Broadcast to WebSockets
+        broadcaster.broadcast_sync(line1)
+        broadcaster.broadcast_sync(line2)
 
     def print_header(self):
         """Print header explaining the format"""

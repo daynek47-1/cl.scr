@@ -3,6 +3,7 @@ import logging
 import random
 import time
 import requests
+import threading
 from datetime import datetime
 from typing import Optional, Dict, List
 from sqlalchemy.orm import Session
@@ -91,7 +92,7 @@ class Worker:
 
         logger.info(f"Worker {worker_id} initialized (proxy: {self.current_proxy or 'None'})")
 
-    def process_site(self, mirror_site: MirrorSite, count: int = 0, total_sites: int = 0) -> Dict:
+    def process_site(self, mirror_site: MirrorSite, count: int = 0, total_sites: int = 0, stop_event: threading.Event = None) -> Dict:
         """
         Process a single mirror site
 
@@ -99,16 +100,7 @@ class Worker:
             mirror_site: The mirror site to process
             count: Current site number (for console display)
             total_sites: Total sites being checked (for console display)
-
-        Returns:
-            {
-                'status': 'success' | 'failed',
-                'bonuses_found': int,
-                'bonuses_new': int,
-                'error': str | None,
-                'error_code': str | None,
-                'error_emoji': str | None
-            }
+            stop_event: Optional event to signal stopping
         """
         start_time = datetime.utcnow()
         result = {
@@ -120,11 +112,17 @@ class Worker:
             'error_emoji': None
         }
 
+        if stop_event and stop_event.is_set():
+            return result
+
         try:
             logger.info(f"Worker {self.worker_id}: Processing {mirror_site.url}")
 
             # Human mimicry: Random delay before starting
             self._human_delay()
+
+            if stop_event and stop_event.is_set():
+                return result
 
             # Log start
             self._log_action('starting', 'in_progress', mirror_site.url)

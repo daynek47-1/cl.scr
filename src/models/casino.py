@@ -110,6 +110,10 @@ class Bonus(Base):
     # Expiration tracking
     expiration_date = Column(DateTime)
     is_expired = Column(Boolean, default=False)
+    
+    # Claim tracking
+    is_claimed = Column(Boolean, default=False)
+    claimed_at = Column(DateTime, nullable=True)
 
     # Metadata
     url = Column(String(500))

@@ -1,6 +1,7 @@
 """Engine Manager - Lifecycle & Heartbeat Orchestrator"""
 import logging
 import os
+import threading
 from datetime import datetime
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -94,7 +95,7 @@ class EngineManager:
             logger.info(f"  Purgatory check: Every {self.purgatory_interval} runs")
             logger.info(f"  Resurrection check: Every {self.resurrection_interval} runs")
 
-    def run_cycle(self) -> Dict:
+    def run_cycle(self, stop_event: threading.Event = None) -> Dict:
         """
         Execute one complete scrape cycle
 
@@ -149,7 +150,8 @@ class EngineManager:
             pv_calculator,
             deduplicator,
             proxy_pool,
-            console
+            console,
+            stop_event
         )
 
         # Aggregate results
@@ -239,7 +241,8 @@ class EngineManager:
         pv_calculator: PVCalculator,
         deduplicator: BonusDeduplicator,
         proxy_pool: ProxyPool,
-        console: TwoLineConsole
+        console: TwoLineConsole,
+        stop_event: threading.Event = None
     ) -> List[Dict]:
         """Execute scraping with parallel workers"""
         results = []
@@ -268,9 +271,13 @@ class EngineManager:
             futures = {}
             total_sites = len(sites)
             for idx, site in enumerate(sites):
+                if stop_event and stop_event.is_set():
+                    logger.info("Stop signal received. Stopping new task submission.")
+                    break
+                
                 worker, db = workers[idx % len(workers)]
                 count = idx + 1
-                future = executor.submit(worker.process_site, site, count, total_sites)
+                future = executor.submit(worker.process_site, site, count, total_sites, stop_event)
                 futures[future] = (site.url, count)
 
             # Collect results

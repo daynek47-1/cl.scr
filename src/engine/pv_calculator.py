@@ -104,9 +104,10 @@ class PVCalculator:
 
         try:
             # Numerator: Reward component
-            # - log2(mw + 1): Logarithmic scaling of withdrawal limit (diminishing returns)
-            # - sqrt(ba): Square root of bonus amount (larger bonuses less efficient per dollar)
-            numerator = 10 * math.log2(mw + 1) * math.sqrt(bonus_amount)
+            # - log2(ba + 1): Logarithmic scaling of bonus amount (diminishing returns on size)
+            # - sqrt(mw): Square root of max withdrawal (scaling for potential payout)
+            # Correction V14.1: User clarified log component applies to amount
+            numerator = 10 * math.log2(bonus_amount + 1) * math.sqrt(mw)
 
             # Denominator: Penalty component
             # - pow(ro, 1.25): Exponential rollover penalty (high rollovers severely penalized)
@@ -118,8 +119,8 @@ class PVCalculator:
 
             # Component breakdown for transparency
             components = {
-                'withdrawal_factor': round(10 * math.log2(mw + 1), 2),
-                'bonus_factor': round(math.sqrt(bonus_amount), 2),
+                'bonus_factor': round(10 * math.log2(bonus_amount + 1), 2),
+                'withdrawal_factor': round(math.sqrt(mw), 2),
                 'rollover_penalty': round(math.pow(ro, 1.25), 2),
                 'size_adjustment': round(math.log10(bonus_amount + 10), 2),
                 'numerator': round(numerator, 2),
