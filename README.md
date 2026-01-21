@@ -430,6 +430,298 @@ cl.scr/
 - **Database**: SQLite handles 10,000+ bonuses efficiently
 - **Memory**: ~200MB for typical operation
 
+## 🗄️ Database Schema
+
+The system uses SQLAlchemy ORM with the following core models:
+
+### MirrorSite
+Tracks casino mirror URLs with health management:
+- `health_status`: ACTIVE → PURGATORY → PRUNED
+- `consecutive_failures`: Tracks failure count for state transitions
+- `last_success`, `last_scraped`: Timestamp tracking
+- `merchant_id`: Extracted from site HTML for API calls
+
+### Bonus
+Comprehensive bonus data with PV scoring:
+- `fingerprint`: SHA256 hash for exact deduplication
+- `parent_bonus_id`: Links fuzzy duplicates to parent
+- `pv_score`: Calculated beatability score (V14)
+- `is_beatable`: Boolean flag for quick filtering
+- `expiration_date`: Parsed from bonus text
+- `seen_on_sites`: Counter for multi-site tracking
+- Financial fields: `bonus_amount`, `rollover`, `max_withdrawal`
+
+### SessionCache
+Authentication token management:
+- `access_token`, `access_id`: API credentials
+- `expires_at`: 6-hour validity period
+- `cookies`: Serialized session cookies
+- Automatic expiration checking
+
+### ScrapeRun
+Complete run cycle tracking:
+- `run_type`: standard, retest, or resurrection
+- `sites_checked`, `bonuses_found`: Statistics
+- `duration_seconds`: Performance metrics
+- Links to individual WorkerLog entries
+
+## 📡 API Endpoints
+
+The web dashboard provides a REST API:
+
+### Statistics
+```bash
+GET /api/stats
+# Returns: active sites, total bonuses, beatable count, last run time
+```
+
+### Best Bonuses
+```bash
+GET /api/bonuses/best?limit=20&beatable_only=true
+# Returns: Top bonuses ranked by PV score
+```
+
+### All Bonuses (Paginated)
+```bash
+GET /api/bonuses?skip=0&limit=50&min_pv=50&beatable_only=false
+# Returns: Filtered bonus list with pagination
+```
+
+### Mirror Sites
+```bash
+GET /api/sites
+# Returns: All mirror sites with health status
+```
+
+### Trigger Scrape
+```bash
+POST /api/scrape/run
+# Triggers immediate scrape cycle
+# Returns: Run statistics
+```
+
+### Scrape History
+```bash
+GET /api/runs?limit=20
+# Returns: Recent scrape run history
+```
+
+## 🧮 V14 Algorithm Deep Dive
+
+### Component Breakdown
+
+The V14 formula has two main parts:
+
+**Numerator (Reward):**
+```python
+10 * log2(max_withdrawal + 1) * sqrt(bonus_amount)
+```
+- `10 *`: Base multiplier for score scaling
+- `log2(mw + 1)`: Logarithmic withdrawal scaling (doubling withdrawal doesn't double value)
+- `sqrt(ba)`: Square root bonus scaling (bigger bonuses have diminishing per-dollar value)
+
+**Denominator (Penalty):**
+```python
+pow(rollover, 1.25) * log10(bonus_amount + 10)
+```
+- `pow(ro, 1.25)`: Exponential rollover penalty (60x is much worse than 30x)
+- `log10(ba + 10)`: Size adjustment (prevents huge bonuses from dominating)
+
+### Real-World Examples
+
+**Case Study 1: Why $500 with 30x > $1000 with 50x**
+```
+Bonus A: $500, 30x rollover, $2000 max withdrawal
+PV = (10 * log2(2001) * sqrt(500)) / (pow(30, 1.25) * log10(510))
+PV = (10 * 10.97 * 22.36) / (95.39 * 2.71)
+PV = 2,453 / 258.5 = 94.9 → Good
+
+Bonus B: $1000, 50x rollover, $2000 max withdrawal
+PV = (10 * log2(2001) * sqrt(1000)) / (pow(50, 1.25) * log10(1010))
+PV = (10 * 10.97 * 31.62) / (167.88 * 3.00)
+PV = 3,469 / 503.6 = 68.9 → Fair
+
+Winner: Bonus A (easier to beat despite lower amount)
+```
+
+**Case Study 2: The No-Deposit Trap**
+```
+No-Deposit: $100, 60x rollover, $50 max withdrawal
+PV = (10 * log2(51) * sqrt(100)) / (pow(60, 1.25) * log10(110))
+PV = (10 * 5.67 * 10) / (191.4 * 2.04)
+PV = 567 / 390.5 = 14.5 → Poor (not beatable)
+
+Reason: High rollover (60x) and restrictive max withdrawal ($50)
+```
+
+### Sensitivity Analysis
+
+**Impact of Rollover Changes:**
+- 20x → 30x: PV drops ~30%
+- 30x → 40x: PV drops ~40%
+- 40x → 60x: PV drops ~55% (exponential!)
+
+**Impact of Max Withdrawal:**
+- $500 → $1000: PV increases ~15%
+- $1000 → $2000: PV increases ~10%
+- $2000 → $4000: PV increases ~7% (diminishing returns)
+
+## 🔄 Migration & Upgrade Notes
+
+### V14 Algorithm Migration
+
+If upgrading from linear PV to V14:
+
+1. **Scores will change**: V14 scores are typically 10-20x different
+2. **Thresholds updated**: Beatability threshold is now 20 (vs. 0)
+3. **Rankings shift**: Some bonuses will rank differently
+4. **Database**: No schema changes needed - just recalculate
+
+**Migration Steps:**
+```python
+# The system automatically uses V14 if USE_V14_FORMULA=true
+# On next scrape, all bonuses will be recalculated with V14
+# To force immediate recalculation:
+python main.py run  # This will update all bonuses
+```
+
+### From Other Systems
+
+If migrating from another bonus scraper:
+
+1. **Import Sites**: Add mirror sites via `python main.py add-site <url>`
+2. **First Run**: Initial scrape will populate database
+3. **Credentials**: Update `.env` with single credential set
+4. **Proxies**: Configure proxy list if using
+5. **Monitor**: Check first run logs for any parsing issues
+
+## ❓ FAQ
+
+### General
+
+**Q: How many mirror sites should I add?**
+A: Start with 5-10, expand to 50-100 for comprehensive coverage. The system handles hundreds efficiently.
+
+**Q: How often should I run scrapes?**
+A: Every 6 hours is recommended. Bonuses don't change that frequently.
+
+**Q: What if a site changes its structure?**
+A: The API endpoint (/api/v1/index.php) is usually stable. If parsing fails, check the API response structure.
+
+### Technical
+
+**Q: Why V14 instead of linear PV?**
+A: V14 models real-world playability better. A $1000 bonus with 60x rollover isn't "beatable" despite high score in linear calculation.
+
+**Q: How does deduplication handle variants?**
+A: SHA256 for exact matches, SequenceMatcher for fuzzy (80% threshold), plus safety checks for numbers/Roman numerals.
+
+**Q: Can I run multiple instances?**
+A: Yes, but use separate databases. SQLite has write locking - for true multi-process, use PostgreSQL.
+
+**Q: How do I customize the PV formula?**
+A: Modify `src/engine/pv_calculator.py` or switch to linear mode and adjust weights in `.env`.
+
+### Troubleshooting
+
+**Q: "ModuleNotFoundError" when running**
+A: Run `pip install -r requirements.txt` to install all dependencies.
+
+**Q: "401 Unauthorized" errors**
+A: Check credentials in `.env`. Session may have expired, system will auto-retry with fresh login.
+
+**Q: Database locked errors**
+A: Only run one scraper instance per database. For concurrent access, use PostgreSQL.
+
+**Q: High CPU usage**
+A: Reduce WORKER_COUNT in `.env`. Default is 5, try 2-3 for lower-spec systems.
+
+## 🔬 Development
+
+### Running Tests
+
+```bash
+# Run unit tests (when implemented)
+pytest tests/
+
+# Test V14 calculation
+python -c "from src.engine.pv_calculator import PVCalculator; calc = PVCalculator(); print(calc.calculate(500, 30, 2000))"
+```
+
+### Development Mode
+
+```bash
+# Enable debug logging
+export LOG_LEVEL=DEBUG
+
+# Use linear PV for easier debugging
+export USE_V14_FORMULA=false
+
+# Single worker for sequential debugging
+export WORKER_COUNT=1
+```
+
+### Adding New Parsers
+
+To support additional casino API formats:
+
+1. Extend `api_client.py` → `extract_bonuses_from_response()`
+2. Add new response path patterns
+3. Test with actual API responses
+4. Update `parse_bonus()` for new field names
+
+Example:
+```python
+# In api_client.py
+possible_paths = [
+    ['data', 'bonuses'],
+    ['result', 'offers'],  # Add new path
+]
+```
+
+## 🎓 Best Practices
+
+### Production Deployment
+
+1. **Use V14 Algorithm**: More accurate for real-world scenarios
+2. **Enable Proxies**: Rotate IPs to avoid detection/blocking
+3. **Monitor Logs**: Check `scrape_runs` table for patterns
+4. **Database Backups**: Regular SQLite backups (or use PostgreSQL)
+5. **Deduplication Rate**: Should stabilize at 70-80%
+6. **Site Health**: Active sites should remain >90% of total
+
+### Optimization Tips
+
+- **Increase Workers**: Up to 10 for high-spec machines
+- **Decrease Delays**: Minimum 1s if using good proxies
+- **Purgatory Tuning**: Lower threshold (3 failures) for aggressive testing
+- **Database Cleanup**: Periodically remove old expired bonuses
+
+### Monitoring
+
+Key metrics to track:
+- **Sites Success Rate**: Should be >85%
+- **New Bonuses per Run**: Should be consistent
+- **PV Score Distribution**: Most beatable bonuses should be PV 50-150
+- **Worker Efficiency**: All workers should complete ~same time
+
+## 📚 Additional Resources
+
+### Understanding Casino Bonuses
+
+- **Rollover/Wagering**: Amount you must bet before withdrawal (e.g., 30x $100 = $3000 wagering)
+- **Max Withdrawal**: Maximum you can cash out from bonus winnings
+- **Game Restrictions**: Slots usually count 100%, table games 10-20%
+- **Time Limits**: Typically 7-30 days to meet requirements
+
+### Mathematical Background
+
+The V14 algorithm is based on:
+- **Information Theory**: log2 for doubling relationships
+- **Diminishing Returns**: sqrt for sublinear scaling
+- **Exponential Penalties**: pow for accelerating difficulty
+- **Normalization**: log10 for size adjustment
+
 ## 🤝 Contributing
 
 This is a specialized intelligence engine. Contributions welcome for:
