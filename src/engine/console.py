@@ -136,13 +136,17 @@ class TwoLineConsole:
     def format_elapsed(self) -> str:
         """Format elapsed time as MM:SS or HHhMMm"""
         elapsed = time.time() - self.start_time
-        if elapsed < 3600:  # Less than 1 hour
-            minutes = int(elapsed // 60)
-            seconds = int(elapsed % 60)
-            return f"{minutes:02d}m{seconds:02d}s"
+        return self._format_duration(elapsed)
+
+    def _format_duration(self, seconds: float) -> str:
+        """Format duration in seconds as MM:SS or HHhMMm"""
+        if seconds < 3600:  # Less than 1 hour
+            minutes = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{minutes:02d}m{secs:02d}s"
         else:
-            hours = int(elapsed // 3600)
-            minutes = int((elapsed % 3600) // 60)
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
             return f"{hours}h{minutes:02d}m"
 
     def estimate_eta(self, total_sites: int) -> str:
@@ -211,28 +215,34 @@ class TwoLineConsole:
         if len(display_url) > 30:
             display_url = display_url[:27] + '...'
 
-        # Line 1: Primary Summary
+        # Calculate total estimated time
+        if self.run_stats['total_count'] > 0:
+            elapsed_seconds = time.time() - self.start_time
+            avg_time_per_site = elapsed_seconds / self.run_stats['total_count']
+            total_estimated = avg_time_per_site * total_sites
+            total_time_str = self._format_duration(total_estimated)
+        else:
+            total_time_str = "--"
+
+        # Line 1: Primary Summary (exact format from specification)
         line1 = (
-            f"{proxy_health_icon}[{int(proxy_health):03d}%]"
-            f"[{count:03d}/{total_sites:03d}]"
-            f"[{run_health_icon}][{int(run_percentage):03d}%]"
-            f"[{hist_health_icon}]"
-            f"[{bonuses_this_site:03d}/{self.run_stats['bonuses_found']:03d}]"
-            f"📊[{status_icon}{self.run_stats['success_count']:03d}]"
-            f"[❌{self.run_stats['fail_count']:03d}]"
-            f"[ERR{self.run_stats['error_count']:03d}]"
-            f"{status_icon}[{status_text}]"
-            f"🌐[{display_url}]"
+            f"{proxy_health_icon}{count:03d}"
+            f"{run_health_icon}{int(run_percentage):03d}%"
+            f"{hist_health_icon}{bonuses_this_site:03d}/{self.run_stats['bonuses_found']:03d}"
+            f"📊{self.run_stats['success_count']:03d}/{self.run_stats['fail_count']:03d}"
+            f"❌{self.run_stats['error_count']}"
+            f"{status_icon}{status_text}"
+            f"🌐{display_url}"
         )
 
-        # Line 2: Performance & Diagnostics
+        # Line 2: Performance & Diagnostics (exact format from specification)
         line2 = (
-            f"🖥️[{cpu:02d}%]"
-            f"💾[{mem}]"
-            f"📶[{latency:.1f}s]/[{avg_lat:.1f}s]"
-            f"🚀[{throughput:.1f}/s]/[{avg_thru:.1f}/s]"
-            f"👷[W{worker_id}]"
-            f"⏱️[{elapsed}] @[{eta}]"
+            f"🖥️{cpu:02d}%"
+            f"💾{mem}"
+            f"📶{latency:.1f}/{avg_lat:.1f}"
+            f"🚀{throughput:.1f}/{avg_thru:.1f}"
+            f"👷{worker_id}"
+            f"⏱️{elapsed}/{total_time_str} @{eta}"
         )
 
         # Print both lines (vertically stacked)
