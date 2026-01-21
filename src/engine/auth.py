@@ -8,6 +8,7 @@ from typing import Optional, Dict, Tuple
 from sqlalchemy.orm import Session
 
 from ..models import SessionCache
+from .errors import map_auth_error, map_exception_to_error
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,13 @@ class AuthManager:
         self.password = password
         self.cache_hours = cache_hours
 
-    def get_session(self, site_url: str) -> Optional[Dict]:
+    def get_session(self, site_url: str) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
         """
         Get valid session for a site (from cache or new login)
 
-        Returns dict with: access_token, access_id, merchant_id, cookies
+        Returns: (session_data, error_info)
+            - session_data: dict with access_token, access_id, merchant_id, cookies (or None)
+            - error_info: tuple of (code, emoji, short_desc, long_desc) (or None)
         """
         # Check cache first
         cached_session = self._get_cached_session(site_url)
@@ -36,17 +39,17 @@ class AuthManager:
                 'access_id': cached_session.access_id,
                 'merchant_id': cached_session.merchant_id,
                 'cookies': json.loads(cached_session.cookies) if cached_session.cookies else {}
-            }
+            }, None
 
         # Cache miss or expired - perform fresh login
         logger.info(f"Performing fresh login for {site_url}")
-        session_data = self._perform_login(site_url)
+        session_data, error_info = self._perform_login(site_url)
 
         if session_data:
             self._cache_session(site_url, session_data)
-            return session_data
+            return session_data, None
 
-        return None
+        return None, error_info
 
     def _get_cached_session(self, site_url: str) -> Optional[SessionCache]:
         """Retrieve session from cache"""
@@ -78,7 +81,7 @@ class AuthManager:
         self.db.commit()
         logger.info(f"Cached session for {site_url} (valid for {self.cache_hours} hours)")
 
-    def _perform_login(self, site_url: str) -> Optional[Dict]:
+    def _perform_login(self, site_url: str) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
         """
         Perform actual login to casino site
 
@@ -87,6 +90,8 @@ class AuthManager:
         2. Submit login form
         3. Extract accessToken and accessId from response
         4. Return session data
+
+        Returns: (session_data, error_info)
         """
         session = requests.Session()
         session.headers.update({
@@ -103,8 +108,9 @@ class AuthManager:
 
             merchant_id = self._extract_merchant_id(response.text)
             if not merchant_id:
+                error_info = map_auth_error('no_merchant_id')
                 logger.error(f"Could not extract merchantId from {site_url}")
-                return None
+                return None, error_info
 
             logger.debug(f"Extracted merchantId: {merchant_id}")
 
@@ -124,6 +130,7 @@ class AuthManager:
 
             access_token = None
             access_id = None
+            last_error = None
 
             for login_url in login_endpoints:
                 try:
@@ -140,13 +147,20 @@ class AuthManager:
                         if access_token and access_id:
                             logger.info(f"Login successful at {login_url}")
                             break
+                        else:
+                            last_error = map_auth_error('no_login_data')
+                    else:
+                        # Map HTTP error
+                        last_error = map_exception_to_error(requests.HTTPError(response=login_response))
                 except Exception as e:
                     logger.debug(f"Login attempt failed at {login_url}: {e}")
+                    last_error = map_exception_to_error(e)
                     continue
 
             if not access_token or not access_id:
+                error_info = last_error if last_error else map_auth_error('login_failed')
                 logger.error(f"Login failed for {site_url}")
-                return None
+                return None, error_info
 
             # Step 3: Return session data
             return {
@@ -154,11 +168,12 @@ class AuthManager:
                 'access_id': access_id,
                 'merchant_id': merchant_id,
                 'cookies': session.cookies.get_dict()
-            }
+            }, None
 
         except Exception as e:
+            error_info = map_auth_error('exception', e)
             logger.error(f"Login error for {site_url}: {e}")
-            return None
+            return None, error_info
 
     def _extract_merchant_id(self, html: str) -> Optional[str]:
         """

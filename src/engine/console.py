@@ -70,7 +70,11 @@ class TwoLineConsole:
         if success:
             return 'DONE'
         elif error_code:
-            return f'E{error_code}'
+            # If error code already starts with E, don't add another E
+            if error_code.startswith('E'):
+                return error_code
+            else:
+                return f'E{error_code}'
         else:
             return 'FAIL'
 
@@ -165,7 +169,8 @@ class TwoLineConsole:
         latency: float,
         proxy_health: float = 100.0,
         hist_health: float = 100.0,
-        error_code: Optional[str] = None
+        error_code: Optional[str] = None,
+        error_emoji: Optional[str] = None
     ):
         """
         Print the 2-line console output
@@ -185,7 +190,12 @@ class TwoLineConsole:
         run_health_icon = self.get_health_gradient(run_percentage)
         hist_health_icon = self.get_health_gradient(hist_health)
 
-        status_icon = self.get_status_icon(success)
+        # Use error emoji if provided, otherwise use default status icon
+        if not success and error_emoji:
+            status_icon = error_emoji
+        else:
+            status_icon = self.get_status_icon(success)
+
         status_text = self.get_status_text(success, error_code)
 
         # Get performance metrics

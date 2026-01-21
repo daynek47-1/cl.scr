@@ -1,10 +1,11 @@
 """Casino API Client for /api/v1/index.php endpoint"""
 import requests
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .auth import AuthManager
+from .errors import map_api_error, map_exception_to_error
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class CasinoAPIClient:
             }
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    def fetch_bonuses(self, site_url: str, retry_auth: bool = True) -> Optional[Dict]:
+    def fetch_bonuses(self, site_url: str, retry_auth: bool = True) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
         """
         Fetch bonus data from casino API
 
@@ -49,14 +50,15 @@ class CasinoAPIClient:
             site_url: Base URL of casino mirror site
             retry_auth: If True, will retry with fresh login on auth failure
 
-        Returns:
-            Dict with bonus data or None on failure
+        Returns: (data, error_info)
+            - data: Dict with bonus data (or None)
+            - error_info: tuple of (code, emoji, short_desc, long_desc) (or None)
         """
         # Get session credentials (from cache or fresh login)
-        session_data = self.auth_manager.get_session(site_url)
+        session_data, error_info = self.auth_manager.get_session(site_url)
         if not session_data:
             logger.error(f"Failed to get session for {site_url}")
-            return None
+            return None, error_info
 
         # Build API endpoint
         api_endpoint = f"{site_url}/api/v1/index.php"
@@ -92,10 +94,11 @@ class CasinoAPIClient:
                 try:
                     data = response.json()
                     logger.info(f"API call successful for {site_url}")
-                    return data
+                    return data, None
                 except ValueError as e:
                     logger.error(f"Invalid JSON response from {site_url}: {e}")
-                    return None
+                    error_info = map_api_error('no_bonus_data')
+                    return None, error_info
 
             elif response.status_code == 401 or response.status_code == 403:
                 # Authentication failed - token likely expired
@@ -107,12 +110,14 @@ class CasinoAPIClient:
                     self.auth_manager.invalidate_session(site_url)
                     return self.fetch_bonuses(site_url, retry_auth=False)
 
-                return None
+                error_info = map_exception_to_error(requests.HTTPError(response=response))
+                return None, error_info
 
             else:
                 logger.error(f"API call failed for {site_url}: HTTP {response.status_code}")
                 logger.debug(f"Response: {response.text[:500]}")
-                return None
+                error_info = map_exception_to_error(requests.HTTPError(response=response))
+                return None, error_info
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Network error calling {site_url}: {e}")

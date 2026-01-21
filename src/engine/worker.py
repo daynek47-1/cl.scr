@@ -13,6 +13,7 @@ from .api_client import CasinoAPIClient
 from .pv_calculator import PVCalculator
 from .deduplicator import BonusDeduplicator
 from .console import TwoLineConsole
+from .errors import map_exception_to_error
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,9 @@ class Worker:
                 'status': 'success' | 'failed',
                 'bonuses_found': int,
                 'bonuses_new': int,
-                'error': str | None
+                'error': str | None,
+                'error_code': str | None,
+                'error_emoji': str | None
             }
         """
         start_time = datetime.utcnow()
@@ -112,7 +115,9 @@ class Worker:
             'status': 'failed',
             'bonuses_found': 0,
             'bonuses_new': 0,
-            'error': None
+            'error': None,
+            'error_code': None,
+            'error_emoji': None
         }
 
         try:
@@ -126,10 +131,15 @@ class Worker:
 
             # Step 1: Fetch bonuses from API
             self._log_action('api_call', 'in_progress', mirror_site.url)
-            api_response = self.api_client.fetch_bonuses(mirror_site.url)
+            api_response, error_info = self.api_client.fetch_bonuses(mirror_site.url)
 
             if not api_response:
-                raise Exception("Failed to fetch data from API")
+                if error_info:
+                    code, emoji, short_desc, long_desc = error_info
+                    result['error'] = long_desc
+                    result['error_code'] = code
+                    result['error_emoji'] = emoji
+                    raise Exception(f"{emoji}E{code}: {short_desc}")
 
             # Step 2: Extract bonuses from response
             self._log_action('parsing', 'in_progress', mirror_site.url)
@@ -187,28 +197,33 @@ class Worker:
 
         except requests.exceptions.HTTPError as e:
             # HTTP error - might be proxy or auth issue
-            error_msg = f"HTTP {e.response.status_code if hasattr(e, 'response') else 'error'}"
+            code, emoji, short_desc, long_desc = map_exception_to_error(e)
+            result['error'] = long_desc
+            result['error_code'] = code
+            result['error_emoji'] = emoji
 
             if hasattr(e, 'response') and e.response.status_code == 403:
                 # Likely proxy blocked, rotate proxy
                 logger.warning(f"Worker {self.worker_id}: 403 error, rotating proxy")
                 self._rotate_proxy()
 
-            result['error'] = error_msg
             mirror_site.mark_failure()
             self.db.commit()
 
-            self._log_action('failed', 'failed', mirror_site.url, error_msg)
+            self._log_action('failed', 'failed', mirror_site.url, long_desc)
 
         except Exception as e:
-            error_msg = str(e)
-            result['error'] = error_msg
+            # Map exception to error code
+            code, emoji, short_desc, long_desc = map_exception_to_error(e)
+            result['error'] = long_desc
+            result['error_code'] = code
+            result['error_emoji'] = emoji
 
             mirror_site.mark_failure()
             self.db.commit()
 
-            self._log_action('failed', 'failed', mirror_site.url, error_msg)
-            logger.error(f"Worker {self.worker_id}: ERROR - {error_msg}")
+            self._log_action('failed', 'failed', mirror_site.url, long_desc)
+            logger.error(f"Worker {self.worker_id}: ERROR - {emoji}E{code}: {short_desc}")
 
         finally:
             duration = (datetime.utcnow() - start_time).total_seconds()
@@ -228,14 +243,9 @@ class Worker:
                     # 0 failures = 100%, 5+ failures = 0%
                     hist_health = max(0, 100 - (mirror_site.consecutive_failures * 20))
 
-                # Parse error code if present
-                error_code = None
-                if result['error']:
-                    # Extract error code from error message (e.g., "HTTP 403" -> "403")
-                    if 'HTTP' in result['error']:
-                        error_code = result['error'].replace('HTTP', '').strip()
-                    else:
-                        error_code = 'ERR'
+                # Get error code and emoji from result
+                error_code = result.get('error_code')
+                error_emoji = result.get('error_emoji')
 
                 self.console.print_two_line(
                     count=count,
@@ -247,7 +257,8 @@ class Worker:
                     latency=duration,
                     proxy_health=proxy_health,
                     hist_health=hist_health,
-                    error_code=error_code
+                    error_code=error_code,
+                    error_emoji=error_emoji
                 )
 
         return result
