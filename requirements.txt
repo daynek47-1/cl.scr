@@ -37,6 +37,7 @@ python-dotenv==1.0.0
 tenacity==8.2.3
 schedule==1.2.0
 cachetools==5.3.2
+psutil==5.9.8
 
 # Async Support
 aiohttp==3.9.1

@@ -13,6 +13,7 @@ from .auth import AuthManager
 from .pv_calculator import PVCalculator
 from .deduplicator import BonusDeduplicator
 from .worker import Worker, ProxyPool
+from .console import TwoLineConsole
 
 load_dotenv()
 
@@ -106,6 +107,10 @@ class EngineManager:
         # Proxy pool setup
         proxy_pool = ProxyPool(self.proxy_list) if self.use_proxies and self.proxy_list else None
 
+        # Console setup
+        console = TwoLineConsole()
+        console.print_header()
+
         # Create scrape run record
         scrape_run = ScrapeRun(
             run_number=self.run_number,
@@ -121,7 +126,8 @@ class EngineManager:
             auth_manager,
             pv_calculator,
             deduplicator,
-            proxy_pool
+            proxy_pool,
+            console
         )
 
         # Aggregate results
@@ -145,6 +151,9 @@ class EngineManager:
         dedup_stats = deduplicator.get_duplicate_stats()
 
         db.close()
+
+        # Print console summary
+        console.print_summary()
 
         # Log summary
         logger.info(f"=" * 60)
@@ -206,7 +215,8 @@ class EngineManager:
         auth_manager: AuthManager,
         pv_calculator: PVCalculator,
         deduplicator: BonusDeduplicator,
-        proxy_pool: ProxyPool
+        proxy_pool: ProxyPool,
+        console: TwoLineConsole
     ) -> List[Dict]:
         """Execute scraping with parallel workers"""
         results = []
@@ -225,20 +235,23 @@ class EngineManager:
                     auth_manager=auth_manager,
                     pv_calculator=pv_calculator,
                     deduplicator=BonusDeduplicator(db),  # Fresh deduplicator for each worker
-                    proxy_pool=proxy_pool
+                    proxy_pool=proxy_pool,
+                    console=console
                 )
                 workers.append((worker, db))
 
             # Submit tasks
             futures = {}
+            total_sites = len(sites)
             for idx, site in enumerate(sites):
                 worker, db = workers[idx % len(workers)]
-                future = executor.submit(worker.process_site, site)
-                futures[future] = site.url
+                count = idx + 1
+                future = executor.submit(worker.process_site, site, count, total_sites)
+                futures[future] = (site.url, count)
 
             # Collect results
             for future in as_completed(futures):
-                site_url = futures[future]
+                site_url, count = futures[future]
                 try:
                     result = future.result()
                     results.append(result)
