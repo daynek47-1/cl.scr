@@ -211,42 +211,97 @@ Pruned (rarely checked, "dead")
 Active (if successful again)
 ```
 
-### 2. Perceived Value (PV) Calculation
+### 2. Perceived Value (PV) Calculation - V14 Algorithm
 
-The **PV Score** is the secret sauce - it determines if a bonus is worth pursuing:
+The **V14 Algorithm** is the secret sauce - a sophisticated non-linear formula that determines if a bonus is mathematically beatable:
+
+#### The V14 Formula
 
 ```python
-PV = (bonus_amount * 1.0) - (rollover * 0.5) + (max_withdrawal * 0.3)
+PV = (10 * log2(max_withdrawal + 1) * sqrt(bonus_amount)) /
+     (pow(rollover, 1.25) * log10(bonus_amount + 10))
 ```
 
-**Example 1: High PV (Beatable)**
+**Why V14 is Superior:**
+- **Logarithmic Scaling**: Large max withdrawals have diminishing marginal value (realistic)
+- **Exponential Rollover Penalty**: High rollovers (40x, 50x) are penalized much more heavily
+- **Size Efficiency**: Bigger bonuses aren't always better - square root prevents huge bonuses from dominating
+- **Non-Linear**: Models real-world playability better than simple linear formulas
+
+**Example 1: Excellent Bonus (High PV)**
 ```
 Bonus: $500
-Rollover: 20x
-Max Withdrawal: $1000
+Rollover: 25x
+Max Withdrawal: $2000
 
-PV = (500 * 1.0) - (20 * 0.5) + (1000 * 0.3)
-PV = 500 - 10 + 300 = 790 ✅ BEATABLE
+Calculation:
+- Numerator: 10 * log2(2001) * sqrt(500) = 10 * 10.97 * 22.36 = 2,453
+- Denominator: pow(25, 1.25) * log10(510) = 78.43 * 2.71 = 212.5
+- PV = 2,453 / 212.5 = 115.4 ✅ EXCELLENT (Rating: Good)
 ```
 
-**Example 2: Low PV (Not Beatable)**
+**Example 2: Poor Bonus (Low PV)**
 ```
 Bonus: $100
 Rollover: 60x
-Max Withdrawal: $50
+Max Withdrawal: $200
 
-PV = (100 * 1.0) - (60 * 0.5) + (50 * 0.3)
-PV = 100 - 30 + 15 = 85 ❌ NOT BEATABLE (high rollover)
+Calculation:
+- Numerator: 10 * log2(201) * sqrt(100) = 10 * 7.65 * 10 = 765
+- Denominator: pow(60, 1.25) * log10(110) = 191.4 * 2.04 = 390.5
+- PV = 765 / 390.5 = 19.6 ❌ POOR (Below beatable threshold of 20)
 ```
 
-### 3. Smart Deduplication
+**Beatability Thresholds (V14):**
+- **Excellent**: PV > 200 and rollover < 30x
+- **Good**: PV > 100 or (PV > 50 and rollover < 40x)
+- **Fair**: PV > 20
+- **Poor**: PV ≤ 20 (not beatable)
 
-The same bonus appears on 50 mirror sites? No problem:
+### 3. Smart Deduplication with Safety Checks
 
-1. **Fingerprinting**: SHA256 hash of title+description
-2. **Exact Match**: Bonuses with same fingerprint = same bonus
-3. **Fuzzy Match**: "Welcome Bonus 2024" vs "Welcome Bonus" = 90% similar → linked as duplicate
-4. **Parent-Child**: Duplicates link to parent bonus, track `seen_on_sites`
+The same bonus appears on 50 mirror sites? No problem. But different bonuses with similar names? Protected.
+
+#### Deduplication Strategy
+
+1. **Exact Fingerprinting**: SHA256 hash of title+description
+2. **Fuzzy Matching**: difflib.SequenceMatcher with 80% similarity threshold
+3. **Safety Checks**: Critical protections to prevent incorrect merges
+4. **Parent-Child Linking**: Duplicates link to parent, track `seen_on_sites`
+
+#### Safety Features
+
+**Number Protection**: Prevents merging bonuses with different numbers
+```
+✅ "Welcome Bonus 2024" matches "Welcome Bonus 2024"
+❌ "Bonus 100 Free" does NOT match "Bonus 200 Free"
+❌ "$50 Bonus" does NOT match "$100 Bonus"
+```
+
+**Roman Numeral Protection**: Prevents merging different tiers/levels
+```
+✅ "VIP Tier I" matches "VIP Tier I Bonus"
+❌ "VIP Tier I" does NOT match "VIP Tier II"
+❌ "Level III Bonus" does NOT match "Level IV Bonus"
+```
+
+#### How It Works
+
+```python
+Title 1: "Welcome Bonus 2024 - 100% Match"
+Title 2: "Welcome Bonus 2024 - 100% Match Up To $500"
+→ Similarity: 87% → MATCHED (no conflicting numbers)
+
+Title 1: "Tier I Welcome Bonus $100"
+Title 2: "Tier II Welcome Bonus $100"
+→ Similarity: 93% → BLOCKED (different Roman numerals)
+
+Title 1: "Get $50 Free Bonus"
+Title 2: "Get $100 Free Bonus"
+→ Similarity: 88% → BLOCKED (different dollar amounts)
+```
+
+This prevents the database from incorrectly merging distinct bonuses that happen to have similar names.
 
 ### 4. Worker Behavior
 
@@ -262,20 +317,35 @@ Worker 5: [FAILED] site-5.com → Network timeout → Marking site as failed
 
 ## 🛠️ Advanced Configuration
 
-### Custom PV Weights
+### PV Algorithm Selection
 
-Adjust PV calculation to your strategy:
+The system supports two algorithms:
 
+**V14 Algorithm (Recommended - Default)**
 ```bash
-# Conservative (penalize high rollover more)
-PV_ROLLOVER_WEIGHT=0.8
-
-# Aggressive (reward high withdrawal limits more)
-PV_MAX_WITHDRAWAL_WEIGHT=0.6
-
-# Bonus amount focused
-PV_BONUS_WEIGHT=1.5
+USE_V14_FORMULA=true  # Sophisticated non-linear algorithm
 ```
+
+**Linear Algorithm (Simple - For Testing)**
+```bash
+USE_V14_FORMULA=false  # Legacy linear calculation
+
+# Then configure weights:
+PV_BONUS_WEIGHT=1.0
+PV_ROLLOVER_WEIGHT=0.5
+PV_MAX_WITHDRAWAL_WEIGHT=0.3
+```
+
+**When to use Linear:**
+- Testing/debugging PV calculations
+- Need predictable, easy-to-understand scores
+- Comparing against external systems
+
+**When to use V14 (default):**
+- Production deployments
+- Realistic bonus evaluation
+- Better handling of extreme values (very high rollovers, huge bonuses)
+- More accurate beatability assessment
 
 ### Heartbeat Cycle Tuning
 

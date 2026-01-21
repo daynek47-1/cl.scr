@@ -1,5 +1,6 @@
-"""Perceived Value (PV) Calculator - The Beatability Algorithm"""
+"""Perceived Value (PV) Calculator - The V14 Beatability Algorithm"""
 import logging
+import math
 from typing import Dict, Optional
 import os
 from dotenv import load_dotenv
@@ -11,34 +12,43 @@ logger = logging.getLogger(__name__)
 
 class PVCalculator:
     """
-    Calculates the Perceived Value (PV) score for bonuses
+    Calculates the Perceived Value (PV) score for bonuses using the V14 algorithm
 
-    The PV score determines if a bonus is mathematically "beatable" for a player.
+    The V14 algorithm uses a sophisticated non-linear formula that accounts for:
+    - Logarithmic scaling of max withdrawal (diminishing returns)
+    - Power scaling of rollover requirements (exponential penalty)
+    - Bonus amount with logarithmic efficiency adjustment
 
-    Formula:
-        PV = (bonus_amount * bonus_weight)
-             - (rollover * rollover_weight)
-             + (max_withdrawal * withdrawal_weight)
+    V14 Formula:
+        PV = (10 * log2(max_withdrawal + 1) * sqrt(bonus_amount)) /
+             (pow(rollover, 1.25) * log10(bonus_amount + 10))
+
+    This creates a more realistic model where:
+    - Large max withdrawals have diminishing marginal value
+    - High rollovers are penalized exponentially
+    - Bonus size has logarithmic efficiency (bigger isn't always better)
 
     Higher PV = More beatable / valuable bonus
     """
 
     def __init__(
         self,
+        use_v14: bool = None,
         bonus_weight: float = None,
         rollover_weight: float = None,
         withdrawal_weight: float = None
     ):
-        # Load weights from environment or use defaults
+        # Use V14 by default (can fall back to simple linear for testing)
+        self.use_v14 = use_v14 if use_v14 is not None else os.getenv('USE_V14_FORMULA', 'true').lower() == 'true'
+
+        # Legacy weights (only used if not using V14)
         self.bonus_weight = bonus_weight or float(os.getenv('PV_BONUS_WEIGHT', 1.0))
         self.rollover_weight = rollover_weight or float(os.getenv('PV_ROLLOVER_WEIGHT', 0.5))
         self.withdrawal_weight = withdrawal_weight or float(os.getenv('PV_MAX_WITHDRAWAL_WEIGHT', 0.3))
 
         logger.info(
             f"PV Calculator initialized: "
-            f"bonus_weight={self.bonus_weight}, "
-            f"rollover_weight={self.rollover_weight}, "
-            f"withdrawal_weight={self.withdrawal_weight}"
+            f"algorithm={'V14 (sophisticated)' if self.use_v14 else 'Linear (simple)'}"
         )
 
     def calculate(
@@ -48,18 +58,14 @@ class PVCalculator:
         max_withdrawal: Optional[float] = None
     ) -> Dict:
         """
-        Calculate PV score for a bonus
+        Calculate PV score for a bonus using V14 algorithm or simple linear
 
         Returns:
             {
                 'pv_score': float,
                 'is_beatable': bool,
-                'rating': str,  # 'Excellent', 'Good', 'Fair', 'Poor'
-                'components': {
-                    'bonus_contribution': float,
-                    'rollover_penalty': float,
-                    'withdrawal_bonus': float
-                }
+                'rating': str,
+                'components': dict
             }
         """
         if not bonus_amount or bonus_amount <= 0:
@@ -67,14 +73,85 @@ class PVCalculator:
                 'pv_score': 0.0,
                 'is_beatable': False,
                 'rating': 'Invalid',
-                'components': {
-                    'bonus_contribution': 0.0,
-                    'rollover_penalty': 0.0,
-                    'withdrawal_bonus': 0.0
-                }
+                'components': {}
             }
 
-        # Calculate components
+        if self.use_v14:
+            return self._calculate_v14(bonus_amount, rollover, max_withdrawal)
+        else:
+            return self._calculate_linear(bonus_amount, rollover, max_withdrawal)
+
+    def _calculate_v14(
+        self,
+        bonus_amount: float,
+        rollover: Optional[float],
+        max_withdrawal: Optional[float]
+    ) -> Dict:
+        """
+        V14 Algorithm - Sophisticated non-linear PV calculation
+
+        Formula:
+            PV = (10 * log2(mw + 1) * sqrt(ba)) / (pow(ro, 1.25) * log10(ba + 10))
+
+        Where:
+            mw = max_withdrawal (defaults to bonus_amount if not set)
+            ba = bonus_amount
+            ro = rollover (defaults to 1 if not set to avoid division by zero)
+        """
+        # Handle defaults
+        mw = max_withdrawal if max_withdrawal and max_withdrawal > 0 else bonus_amount
+        ro = rollover if rollover and rollover > 0 else 1.0
+
+        try:
+            # Numerator: Reward component
+            # - log2(mw + 1): Logarithmic scaling of withdrawal limit (diminishing returns)
+            # - sqrt(ba): Square root of bonus amount (larger bonuses less efficient per dollar)
+            numerator = 10 * math.log2(mw + 1) * math.sqrt(bonus_amount)
+
+            # Denominator: Penalty component
+            # - pow(ro, 1.25): Exponential rollover penalty (high rollovers severely penalized)
+            # - log10(ba + 10): Logarithmic bonus size adjustment (prevents huge bonuses dominating)
+            denominator = math.pow(ro, 1.25) * math.log10(bonus_amount + 10)
+
+            # Final PV score
+            pv_score = numerator / denominator
+
+            # Component breakdown for transparency
+            components = {
+                'withdrawal_factor': round(10 * math.log2(mw + 1), 2),
+                'bonus_factor': round(math.sqrt(bonus_amount), 2),
+                'rollover_penalty': round(math.pow(ro, 1.25), 2),
+                'size_adjustment': round(math.log10(bonus_amount + 10), 2),
+                'numerator': round(numerator, 2),
+                'denominator': round(denominator, 2)
+            }
+
+        except (ValueError, ZeroDivisionError) as e:
+            logger.error(f"V14 calculation error: {e}")
+            pv_score = 0.0
+            components = {}
+
+        # Determine beatability
+        is_beatable = self._is_beatable_v14(bonus_amount, ro, mw, pv_score)
+
+        # Rating
+        rating = self._get_rating_v14(pv_score, ro)
+
+        return {
+            'pv_score': round(pv_score, 2),
+            'is_beatable': is_beatable,
+            'rating': rating,
+            'components': components,
+            'algorithm': 'V14'
+        }
+
+    def _calculate_linear(
+        self,
+        bonus_amount: float,
+        rollover: Optional[float],
+        max_withdrawal: Optional[float]
+    ) -> Dict:
+        """Simple linear calculation (legacy/testing)"""
         bonus_contribution = bonus_amount * self.bonus_weight
 
         rollover_penalty = 0.0
@@ -85,13 +162,9 @@ class PVCalculator:
         if max_withdrawal and max_withdrawal > 0:
             withdrawal_bonus = max_withdrawal * self.withdrawal_weight
 
-        # Final PV score
         pv_score = bonus_contribution - rollover_penalty + withdrawal_bonus
 
-        # Determine beatability
         is_beatable = self._is_beatable(bonus_amount, rollover, max_withdrawal, pv_score)
-
-        # Rating
         rating = self._get_rating(pv_score, rollover or 0)
 
         return {
@@ -102,8 +175,55 @@ class PVCalculator:
                 'bonus_contribution': round(bonus_contribution, 2),
                 'rollover_penalty': round(rollover_penalty, 2),
                 'withdrawal_bonus': round(withdrawal_bonus, 2)
-            }
+            },
+            'algorithm': 'Linear'
         }
+
+    def _is_beatable_v14(
+        self,
+        bonus_amount: float,
+        rollover: float,
+        max_withdrawal: float,
+        pv_score: float
+    ) -> bool:
+        """
+        V14 beatability determination (more sophisticated)
+
+        Criteria:
+        1. PV score must be >= 20 (V14 scores are typically higher range)
+        2. Rollover must be reasonable (< 60x for V14)
+        3. Rollover-to-withdrawal ratio must be acceptable
+        """
+        if pv_score < 20:
+            return False
+
+        # Rollover too high
+        if rollover > 60:
+            return False
+
+        # Check rollover efficiency: rollover shouldn't be more than 2x the withdrawal limit
+        if rollover > (max_withdrawal / bonus_amount) * 2:
+            return False
+
+        return True
+
+    def _get_rating_v14(self, pv_score: float, rollover: float) -> str:
+        """
+        V14 rating system (adjusted for higher score range)
+
+        Excellent: PV > 200 and rollover < 30
+        Good: PV > 100 or (PV > 50 and rollover < 40)
+        Fair: PV > 20
+        Poor: PV <= 20
+        """
+        if pv_score > 200 and rollover < 30:
+            return 'Excellent'
+        elif pv_score > 100 or (pv_score > 50 and rollover < 40):
+            return 'Good'
+        elif pv_score > 20:
+            return 'Fair'
+        else:
+            return 'Poor'
 
     def _is_beatable(
         self,
@@ -112,37 +232,20 @@ class PVCalculator:
         max_withdrawal: Optional[float],
         pv_score: float
     ) -> bool:
-        """
-        Determine if bonus is beatable
-
-        Criteria:
-        1. PV score must be positive
-        2. Rollover must be reasonable (< 50x)
-        3. If max_withdrawal exists, it should be >= bonus_amount
-        """
+        """Legacy linear beatability check"""
         if pv_score <= 0:
             return False
 
-        # Rollover too high
         if rollover and rollover > 50:
             return False
 
-        # Max withdrawal too restrictive
         if max_withdrawal and max_withdrawal < bonus_amount * 0.5:
-            # Can only withdraw less than half the bonus
             return False
 
         return True
 
     def _get_rating(self, pv_score: float, rollover: float) -> str:
-        """
-        Get human-readable rating
-
-        Excellent: PV > 100 and rollover < 30
-        Good: PV > 50 or (PV > 0 and rollover < 40)
-        Fair: PV > 0
-        Poor: PV <= 0
-        """
+        """Legacy linear rating"""
         if pv_score > 100 and rollover < 30:
             return 'Excellent'
         elif pv_score > 50 or (pv_score > 0 and rollover < 40):

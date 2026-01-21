@@ -1,8 +1,9 @@
 """Smart Bonus Deduplication with Fingerprinting and Fuzzy Matching"""
 import logging
+import re
 from typing import Optional, Dict, List
+from difflib import SequenceMatcher
 from sqlalchemy.orm import Session
-from fuzzywuzzy import fuzz
 import dateparser
 
 from ..models import Bonus
@@ -12,17 +13,22 @@ logger = logging.getLogger(__name__)
 
 class BonusDeduplicator:
     """
-    Handles deduplication of bonuses across mirror sites
+    Handles deduplication of bonuses across mirror sites with safety checks
 
     Strategy:
     1. Exact Match: Use SHA256 fingerprint of title+description
-    2. Fuzzy Match: Use Levenshtein distance for similar but not identical bonuses
-    3. Parent-Child: Link fuzzy-matched bonuses to a parent record
+    2. Fuzzy Match: Use SequenceMatcher for similar but not identical bonuses
+    3. Safety Checks: Prevent merging bonuses with different numbers or Roman numerals
+    4. Parent-Child: Link fuzzy-matched bonuses to a parent record
+
+    Safety Features:
+    - Number protection: "Bonus 100" will NOT match "Bonus 200" even if 80%+ similar
+    - Roman numeral protection: "Tier I" will NOT match "Tier II"
     """
 
-    def __init__(self, db: Session, fuzzy_threshold: int = 85):
+    def __init__(self, db: Session, fuzzy_threshold: float = 0.80):
         self.db = db
-        self.fuzzy_threshold = fuzzy_threshold  # Similarity threshold (0-100)
+        self.fuzzy_threshold = fuzzy_threshold  # Similarity threshold (0.0-1.0, default 80%)
 
     def find_or_create_bonus(
         self,
@@ -101,9 +107,11 @@ class BonusDeduplicator:
 
     def _find_fuzzy_match(self, title: str) -> Optional[Bonus]:
         """
-        Find fuzzy match for bonus title
+        Find fuzzy match for bonus title with safety checks
 
-        Uses Levenshtein distance to find similar bonuses
+        Uses SequenceMatcher (difflib) and prevents dangerous merges:
+        - Different numbers: "Bonus 100" vs "Bonus 200" → NO MATCH
+        - Different Roman numerals: "Tier I" vs "Tier II" → NO MATCH
         """
         # Get all active bonuses (parent bonuses only to avoid deep nesting)
         candidates = self.db.query(Bonus).filter(
@@ -112,23 +120,85 @@ class BonusDeduplicator:
         ).all()
 
         best_match = None
-        best_score = 0
+        best_score = 0.0
+
+        title_lower = title.lower()
 
         for candidate in candidates:
-            # Calculate similarity
-            score = fuzz.ratio(title.lower(), candidate.title.lower())
+            candidate_lower = candidate.title.lower()
 
-            if score > best_score and score >= self.fuzzy_threshold:
+            # Calculate similarity using SequenceMatcher
+            score = SequenceMatcher(None, title_lower, candidate_lower).ratio()
+
+            if score >= self.fuzzy_threshold and score > best_score:
+                # SAFETY CHECK: Prevent merging bonuses with different numbers
+                if not self._safe_to_merge_numbers(title, candidate.title):
+                    logger.debug(
+                        f"Blocked fuzzy match due to different numbers: "
+                        f"'{title[:30]}' vs '{candidate.title[:30]}' (similarity: {score:.2%})"
+                    )
+                    continue
+
+                # SAFETY CHECK: Prevent merging bonuses with different Roman numerals
+                if not self._safe_to_merge_roman_numerals(title, candidate.title):
+                    logger.debug(
+                        f"Blocked fuzzy match due to different Roman numerals: "
+                        f"'{title[:30]}' vs '{candidate.title[:30]}' (similarity: {score:.2%})"
+                    )
+                    continue
+
                 best_score = score
                 best_match = candidate
 
         if best_match:
             logger.debug(
                 f"Fuzzy match found: '{title[:30]}' -> '{best_match.title[:30]}' "
-                f"(similarity: {best_score}%)"
+                f"(similarity: {best_score:.2%})"
             )
 
         return best_match
+
+    def _safe_to_merge_numbers(self, title1: str, title2: str) -> bool:
+        """
+        Check if two titles with numbers can be safely merged
+
+        Returns False if they contain different numbers (e.g., "100" vs "200")
+        Returns True if they have the same numbers or no numbers
+        """
+        # Extract all numbers from both titles
+        numbers1 = set(re.findall(r'\d+', title1))
+        numbers2 = set(re.findall(r'\d+', title2))
+
+        # If both have numbers, they must be the same
+        if numbers1 and numbers2:
+            # Check for any differing numbers
+            if numbers1 != numbers2:
+                # They have different numbers
+                return False
+
+        return True
+
+    def _safe_to_merge_roman_numerals(self, title1: str, title2: str) -> bool:
+        """
+        Check if two titles with Roman numerals can be safely merged
+
+        Returns False if they contain different Roman numerals (e.g., "I" vs "II")
+        Returns True if they have the same Roman numerals or none
+        """
+        # Roman numeral pattern (common ones: I, II, III, IV, V, VI, VII, VIII, IX, X)
+        roman_pattern = r'\b(I{1,3}|IV|V|VI{0,3}|IX|X)\b'
+
+        # Extract Roman numerals (case-insensitive)
+        romans1 = set(re.findall(roman_pattern, title1.upper()))
+        romans2 = set(re.findall(roman_pattern, title2.upper()))
+
+        # If both have Roman numerals, they must be the same
+        if romans1 and romans2:
+            if romans1 != romans2:
+                # They have different Roman numerals
+                return False
+
+        return True
 
     def _update_bonus(
         self,
