@@ -235,10 +235,9 @@ class TwoLineConsole:
             f"⏱️[{elapsed}] @[{eta}]"
         )
 
-        # Print both lines
-        print(f"\r{line1}")
-        print(f"{line2}")
-        print()  # Blank line for separation
+        # Print both lines (vertically stacked)
+        print(line1)
+        print(line2)
 
     def print_header(self):
         """Print header explaining the format"""
