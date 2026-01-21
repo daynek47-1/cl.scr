@@ -227,7 +227,7 @@ async def dashboard():
                     </div>
                     <div class="stat-card">
                         <div class="stat-value" id="beatableBonuses">-</div>
-                        <div>Beatable</div>
+                        <div>High Value</div>
                     </div>
                 </div>
                 
@@ -421,7 +421,7 @@ async def dashboard():
                         <td>$${b.bonus_amount || 0}</td>
                         <td>${b.rollover || 0}x</td>
                         <td style="color: ${b.pv_score > 50 ? '#4CAF50' : '#e0e0e0'}">${b.pv_score}</td>
-                        <td>${b.is_claimed ? '<span style="color:#aaa">Claimed</span>' : (b.is_beatable ? '<span style="color:#4CAF50">Beatable</span>' : 'Standard')}</td>
+                        <td>${b.is_claimed ? '<span style="color:#aaa">Claimed</span>' : (b.is_beatable ? '<span style="color:#4CAF50">High Value</span>' : 'Standard')}</td>
                         <td>
                             ${!b.is_claimed ? `<button class="btn btn-primary" style="padding: 2px 8px; font-size: 12px;" onclick="claimBonus(${b.id})">Claim</button>` : ''}
                         </td>

@@ -15,20 +15,20 @@ class PVCalculator:
     Calculates the Perceived Value (PV) score for bonuses using the V14 algorithm
 
     The V14 algorithm uses a sophisticated non-linear formula that accounts for:
-    - Logarithmic scaling of max withdrawal (diminishing returns)
+    - Logarithmic scaling of bonus amount (diminishing returns)
     - Power scaling of rollover requirements (exponential penalty)
-    - Bonus amount with logarithmic efficiency adjustment
+    - Max withdrawal with square root scaling
 
     V14 Formula:
-        PV = (10 * log2(max_withdrawal + 1) * sqrt(bonus_amount)) /
+        PV = (10 * log2(bonus_amount + 1) * sqrt(max_withdrawal)) /
              (pow(rollover, 1.25) * log10(bonus_amount + 10))
 
     This creates a more realistic model where:
-    - Large max withdrawals have diminishing marginal value
-    - High rollovers are penalized exponentially
     - Bonus size has logarithmic efficiency (bigger isn't always better)
+    - High rollovers are penalized exponentially
+    - Max withdrawal provides sub-linear utility
 
-    Higher PV = More beatable / valuable bonus
+    Higher PV = Higher relative average value
     """
 
     def __init__(

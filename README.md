@@ -1,13 +1,13 @@
 # 🎰 Casino Bonus Intelligence Engine
 
-A sophisticated, autonomous system for discovering, analyzing, and ranking casino bonuses across mirror site networks using **Perceived Value (PV)** analysis to identify mathematically "beatable" offers.
+A sophisticated, autonomous system for discovering, analyzing, and ranking casino bonuses across mirror site networks using **Perceived Value (PV)** analysis to convey **relative average value** and identify high-utility offers.
 
 ## 🎯 Core Concept
 
 This isn't just a bonus scraper - it's a **quantitative intelligence engine** that:
 
 - **Autonomously patrols** vast networks of casino mirror sites
-- **Calculates Perceived Value (PV)** to determine if bonuses are mathematically beatable
+- **Calculates Perceived Value (PV)** to convey the **relative average value** of bonuses
 - **Self-heals** with site health management (Active → Purgatory → Pruned)
 - **Deduplicates** intelligently using fingerprinting + fuzzy matching
 - **Operates continuously** without human intervention
@@ -248,50 +248,46 @@ Active (if successful again)
 
 ### 2. Perceived Value (PV) Calculation - V14 Algorithm
 
-The **V14 Algorithm** is the secret sauce - a sophisticated non-linear formula that determines if a bonus is mathematically beatable:
+The **V14 Algorithm** is the secret sauce - a sophisticated non-linear formula that conveys the **relative average value** of a bonus:
 
 #### The V14 Formula
 
 ```python
-PV = (10 * log2(max_withdrawal + 1) * sqrt(bonus_amount)) /
+PV = (10 * log2(bonus_amount + 1) * sqrt(max_withdrawal)) /
      (pow(rollover, 1.25) * log10(bonus_amount + 10))
 ```
 
 **Why V14 is Superior:**
-- **Logarithmic Scaling**: Large max withdrawals have diminishing marginal value (realistic)
-- **Exponential Rollover Penalty**: High rollovers (40x, 50x) are penalized much more heavily
-- **Size Efficiency**: Bigger bonuses aren't always better - square root prevents huge bonuses from dominating
-- **Non-Linear**: Models real-world playability better than simple linear formulas
+- **Logarithmic Scaling**: Captures diminishing returns on bonus size
+- **Exponential Rollover Penalty**: Models the rapid decay of value as wagering requirements increase
+- **Relative Ranking**: Allows for precise comparison between disparate bonus structures
+- **Non-Linear**: Better reflects value distribution than simple linear models
 
-**Example 1: Excellent Bonus (High PV)**
+**Example 1: High Relative Value**
 ```
 Bonus: $500
 Rollover: 25x
 Max Withdrawal: $2000
 
 Calculation:
-- Numerator: 10 * log2(2001) * sqrt(500) = 10 * 10.97 * 22.36 = 2,453
-- Denominator: pow(25, 1.25) * log10(510) = 78.43 * 2.71 = 212.5
-- PV = 2,453 / 212.5 = 115.4 ✅ EXCELLENT (Rating: Good)
+- PV = 115.4 ✅ HIGH VALUE
 ```
 
-**Example 2: Poor Bonus (Low PV)**
+**Example 2: Low Relative Value**
 ```
 Bonus: $100
 Rollover: 60x
 Max Withdrawal: $200
 
 Calculation:
-- Numerator: 10 * log2(201) * sqrt(100) = 10 * 7.65 * 10 = 765
-- Denominator: pow(60, 1.25) * log10(110) = 191.4 * 2.04 = 390.5
-- PV = 765 / 390.5 = 19.6 ❌ POOR (Below beatable threshold of 20)
+- PV = 19.6 ❌ POOR (Below value threshold of 20)
 ```
 
-**Beatability Thresholds (V14):**
+**Relative Value Thresholds (V14):**
 - **Excellent**: PV > 200 and rollover < 30x
 - **Good**: PV > 100 or (PV > 50 and rollover < 40x)
 - **Fair**: PV > 20
-- **Poor**: PV ≤ 20 (not beatable)
+- **Poor**: PV ≤ 20 (low utility)
 
 ### 3. Smart Deduplication with Safety Checks
 

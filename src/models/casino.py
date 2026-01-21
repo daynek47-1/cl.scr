@@ -104,8 +104,8 @@ class Bonus(Base):
     requires_code = Column(Boolean, default=False)
 
     # Perceived Value (PV) Score - THE KEY METRIC
-    pv_score = Column(Float, index=True)  # Calculated beatability score
-    is_beatable = Column(Boolean, default=False)  # Quick flag for high-value bonuses
+    pv_score = Column(Float, index=True)  # Calculated relative average value
+    is_beatable = Column(Boolean, default=False)  # Quick flag for high relative value bonuses
 
     # Expiration tracking
     expiration_date = Column(DateTime)
