@@ -14,20 +14,38 @@ logger = logging.getLogger(__name__)
 
 
 class AuthManager:
-    """Manages authentication and session caching for casino mirror sites"""
+    """
+    Manages authentication and session caching for casino mirror sites
 
-    def __init__(self, db: Session, username: str, password: str, cache_hours: int = 6):
+    Implements the "Swarm Strategy" - tries primary username first, then all alternates
+    """
+
+    def __init__(self, db: Session, usernames: list, passwords: list, cache_hours: int = 6):
+        """
+        Args:
+            db: Database session
+            usernames: List of usernames to try (primary will be selected per-site)
+            passwords: List of passwords (must match usernames 1:1)
+            cache_hours: Hours to cache sessions
+        """
         self.db = db
-        self.username = username
-        self.password = password
+        self.usernames = usernames
+        self.passwords = passwords
+        self.credentials = list(zip(usernames, passwords))  # [(user1, pass1), (user2, pass2), ...]
         self.cache_hours = cache_hours
 
-    def get_session(self, site_url: str) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
+    def get_session(self, site_url: str, primary_username: str = None) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
         """
         Get valid session for a site (from cache or new login)
 
+        Implements Swarm Strategy: tries primary username first, then all alternates
+
+        Args:
+            site_url: URL of the site
+            primary_username: Last known working username for this site (or None)
+
         Returns: (session_data, error_info)
-            - session_data: dict with access_token, access_id, merchant_id, cookies (or None)
+            - session_data: dict with access_token, access_id, merchant_id, cookies, successful_username (or None)
             - error_info: tuple of (code, emoji, short_desc, long_desc) (or None)
         """
         # Check cache first
@@ -38,12 +56,13 @@ class AuthManager:
                 'access_token': cached_session.access_token,
                 'access_id': cached_session.access_id,
                 'merchant_id': cached_session.merchant_id,
-                'cookies': json.loads(cached_session.cookies) if cached_session.cookies else {}
+                'cookies': json.loads(cached_session.cookies) if cached_session.cookies else {},
+                'successful_username': None  # From cache, username already known
             }, None
 
-        # Cache miss or expired - perform fresh login
-        logger.info(f"Performing fresh login for {site_url}")
-        session_data, error_info = self._perform_login(site_url)
+        # Cache miss or expired - perform fresh login with Swarm Strategy
+        logger.info(f"Performing fresh login for {site_url} (Swarm Strategy)")
+        session_data, error_info = self._perform_login_swarm(site_url, primary_username)
 
         if session_data:
             self._cache_session(site_url, session_data)
@@ -81,9 +100,60 @@ class AuthManager:
         self.db.commit()
         logger.info(f"Cached session for {site_url} (valid for {self.cache_hours} hours)")
 
-    def _perform_login(self, site_url: str) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
+    def _perform_login_swarm(self, site_url: str, primary_username: str = None) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
         """
-        Perform actual login to casino site
+        Perform login with Swarm Strategy: try primary first, then all alternates
+
+        Args:
+            site_url: URL to login to
+            primary_username: Last known working username (or None to start with first)
+
+        Returns: (session_data_with_username, error_info)
+            session_data includes 'successful_username' field
+        """
+        # Order credentials: primary first, then all others
+        ordered_credentials = []
+        tried_usernames = []
+
+        if primary_username:
+            # Find primary credentials
+            for username, password in self.credentials:
+                if username == primary_username:
+                    ordered_credentials.append((username, password))
+                    break
+
+        # Add all other credentials
+        for username, password in self.credentials:
+            if username != primary_username:
+                ordered_credentials.append((username, password))
+
+        # Try each credential set
+        last_error = None
+        for username, password in ordered_credentials:
+            tried_usernames.append(username)
+            logger.debug(f"Trying username {username} for {site_url}")
+
+            session_data, error_info = self._perform_login(site_url, username, password)
+
+            if session_data:
+                # Success! Add the successful username to the session data
+                session_data['successful_username'] = username
+                session_data['alts_tried'] = json.dumps(tried_usernames)
+                logger.info(f"✓ Login successful with username {username} for {site_url}")
+                return session_data, None
+            else:
+                # This username failed, remember error and try next
+                last_error = error_info
+                logger.debug(f"✗ Login failed with username {username} for {site_url}")
+
+        # All usernames failed
+        logger.error(f"✗ All {len(tried_usernames)} usernames failed for {site_url}")
+        # Return the error from the last attempt
+        return None, last_error if last_error else map_auth_error('login_failed')
+
+    def _perform_login(self, site_url: str, username: str, password: str) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
+        """
+        Perform actual login to casino site with specific credentials
 
         Steps:
         1. Load homepage and extract merchantId from HTML
@@ -116,8 +186,8 @@ class AuthManager:
 
             # Step 2: Perform login
             login_data = {
-                'username': self.username,
-                'password': self.password,
+                'username': username,
+                'password': password,
                 'merchantId': merchant_id,
             }
 

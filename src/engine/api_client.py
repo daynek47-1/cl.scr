@@ -42,20 +42,21 @@ class CasinoAPIClient:
             }
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    def fetch_bonuses(self, site_url: str, retry_auth: bool = True) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
+    def fetch_bonuses(self, site_url: str, primary_username: str = None, retry_auth: bool = True) -> Tuple[Optional[Dict], Optional[Tuple[str, str, str, str]]]:
         """
-        Fetch bonus data from casino API
+        Fetch bonus data from casino API with Swarm Strategy support
 
         Args:
             site_url: Base URL of casino mirror site
+            primary_username: Last known working username for this site (or None)
             retry_auth: If True, will retry with fresh login on auth failure
 
         Returns: (data, error_info)
-            - data: Dict with bonus data (or None)
+            - data: Dict with bonus data, successful_username, alts_tried (or None)
             - error_info: tuple of (code, emoji, short_desc, long_desc) (or None)
         """
-        # Get session credentials (from cache or fresh login)
-        session_data, error_info = self.auth_manager.get_session(site_url)
+        # Get session credentials (from cache or fresh login with Swarm Strategy)
+        session_data, error_info = self.auth_manager.get_session(site_url, primary_username)
         if not session_data:
             logger.error(f"Failed to get session for {site_url}")
             return None, error_info
@@ -93,6 +94,9 @@ class CasinoAPIClient:
             if response.status_code == 200:
                 try:
                     data = response.json()
+                    # Add Swarm Strategy metadata to response
+                    data['_successful_username'] = session_data.get('successful_username')
+                    data['_alts_tried'] = session_data.get('alts_tried')
                     logger.info(f"API call successful for {site_url}")
                     return data, None
                 except ValueError as e:
@@ -108,7 +112,7 @@ class CasinoAPIClient:
                     logger.info(f"Retrying with fresh login for {site_url}")
                     # Invalidate cache and retry
                     self.auth_manager.invalidate_session(site_url)
-                    return self.fetch_bonuses(site_url, retry_auth=False)
+                    return self.fetch_bonuses(site_url, primary_username, retry_auth=False)
 
                 error_info = map_exception_to_error(requests.HTTPError(response=response))
                 return None, error_info

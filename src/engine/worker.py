@@ -129,9 +129,10 @@ class Worker:
             # Log start
             self._log_action('starting', 'in_progress', mirror_site.url)
 
-            # Step 1: Fetch bonuses from API
+            # Step 1: Fetch bonuses from API (with Swarm Strategy)
             self._log_action('api_call', 'in_progress', mirror_site.url)
-            api_response, error_info = self.api_client.fetch_bonuses(mirror_site.url)
+            primary_username = mirror_site.username  # Last known working username (or None)
+            api_response, error_info = self.api_client.fetch_bonuses(mirror_site.url, primary_username)
 
             if not api_response:
                 if error_info:
@@ -139,7 +140,23 @@ class Worker:
                     result['error'] = long_desc
                     result['error_code'] = code
                     result['error_emoji'] = emoji
+                    # Update alts_tried if all usernames were exhausted
                     raise Exception(f"{emoji}E{code}: {short_desc}")
+
+            # Check if a different username succeeded (Swarm Strategy)
+            successful_username = api_response.get('_successful_username')
+            alts_tried = api_response.get('_alts_tried')
+
+            if successful_username and successful_username != mirror_site.username:
+                # Self-healing: Remember the username that worked
+                logger.info(f"✓ Swarm Success: {successful_username} worked for {mirror_site.url} (was: {mirror_site.username})")
+                mirror_site.username = successful_username
+                self.db.commit()
+
+            if alts_tried:
+                # Update the list of usernames tried
+                mirror_site.alts_tried = alts_tried
+                self.db.commit()
 
             # Step 2: Extract bonuses from response
             self._log_action('parsing', 'in_progress', mirror_site.url)

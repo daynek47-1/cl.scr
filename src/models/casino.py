@@ -22,6 +22,10 @@ class MirrorSite(Base):
     url = Column(String(500), unique=True, nullable=False, index=True)
     merchant_id = Column(String(100))  # Extracted from site HTML
 
+    # Authentication tracking (Swarm Strategy)
+    username = Column(String(100))  # Last successful username for this site
+    alts_tried = Column(Text)  # JSON array of all usernames attempted
+
     # Health tracking
     health_status = Column(Enum(SiteHealth), default=SiteHealth.ACTIVE, index=True)
     consecutive_failures = Column(Integer, default=0)

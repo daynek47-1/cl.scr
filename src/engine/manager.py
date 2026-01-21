@@ -42,16 +42,27 @@ class EngineManager:
 
     def __init__(
         self,
-        username: str = None,
-        password: str = None,
+        usernames: List[str] = None,
+        passwords: List[str] = None,
         worker_count: int = None,
         use_proxies: bool = None,
         proxy_list: List[str] = None,
         quiet_mode: bool = True
     ):
         # Configuration from environment or parameters
-        self.username = username or os.getenv('CASINO_USERNAME')
-        self.password = password or os.getenv('CASINO_PASSWORD')
+        # Support Swarm Strategy with multiple usernames
+        if usernames and passwords:
+            self.usernames = usernames
+            self.passwords = passwords
+        else:
+            usernames_str = os.getenv('CASINO_USERNAMES', '')
+            passwords_str = os.getenv('CASINO_PASSWORDS', '')
+            self.usernames = [u.strip() for u in usernames_str.split(',') if u.strip()]
+            self.passwords = [p.strip() for p in passwords_str.split(',') if p.strip()]
+
+        if len(self.usernames) != len(self.passwords):
+            raise ValueError("Number of usernames must match number of passwords")
+
         self.worker_count = worker_count or int(os.getenv('WORKER_COUNT', 5))
         self.use_proxies = use_proxies or os.getenv('USE_PROXIES', 'false').lower() == 'true'
         self.quiet_mode = quiet_mode if quiet_mode is not None else os.getenv('QUIET_MODE', 'true').lower() == 'true'
@@ -77,6 +88,7 @@ class EngineManager:
             logging.getLogger('src.engine').setLevel(logging.CRITICAL)
         else:
             logger.info(f"Engine Manager initialized:")
+            logger.info(f"  Usernames (Swarm): {len(self.usernames)}")
             logger.info(f"  Workers: {self.worker_count}")
             logger.info(f"  Proxies: {len(self.proxy_list) if self.use_proxies else 0}")
             logger.info(f"  Purgatory check: Every {self.purgatory_interval} runs")
@@ -110,7 +122,7 @@ class EngineManager:
 
         # Initialize components
         db = SessionLocal()
-        auth_manager = AuthManager(db, self.username, self.password)
+        auth_manager = AuthManager(db, self.usernames, self.passwords)
         pv_calculator = PVCalculator()
         deduplicator = BonusDeduplicator(db)
 
