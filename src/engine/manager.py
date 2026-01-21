@@ -54,7 +54,7 @@ class EngineManager:
         self.password = password or os.getenv('CASINO_PASSWORD')
         self.worker_count = worker_count or int(os.getenv('WORKER_COUNT', 5))
         self.use_proxies = use_proxies or os.getenv('USE_PROXIES', 'false').lower() == 'true'
-        self.quiet_mode = quiet_mode
+        self.quiet_mode = quiet_mode if quiet_mode is not None else os.getenv('QUIET_MODE', 'true').lower() == 'true'
 
         # Proxy setup
         if proxy_list:
@@ -72,9 +72,9 @@ class EngineManager:
 
         # Set logging level based on quiet mode
         if self.quiet_mode:
-            # In quiet mode, only show warnings and errors
-            logging.getLogger().setLevel(logging.WARNING)
-            logging.getLogger('src.engine').setLevel(logging.WARNING)
+            # In quiet mode, suppress all logs (only show critical failures)
+            logging.getLogger().setLevel(logging.CRITICAL)
+            logging.getLogger('src.engine').setLevel(logging.CRITICAL)
         else:
             logger.info(f"Engine Manager initialized:")
             logger.info(f"  Workers: {self.worker_count}")
